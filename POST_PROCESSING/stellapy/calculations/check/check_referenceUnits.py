@@ -2,7 +2,7 @@
 ''' Run read_wout() as a bash command on the command prompt.'''
 
 # Load the modules
-import sys, os
+import sys, os, pathlib
 
 # Tell python where to find the personal modules
 sys.path.append(os.path.abspath(pathlib.Path(os.environ.get('STELLAPY')).parent)+os.path.sep)
