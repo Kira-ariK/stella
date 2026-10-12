@@ -92,7 +92,7 @@ contains
       if (mod(istep, 2) == 1 .or. .not. flip_flop) then
 
          if (prp_shear_enabled) then
-            call advance_perp_flow_shear(g)
+            call remap_flow_shear(g, phi, apar, bpar)
             fields_updated = .false.
          end if
 
@@ -161,7 +161,7 @@ contains
          end if
 
          if (prp_shear_enabled) then
-            call advance_perp_flow_shear(g)
+            call remap_flow_shear(g, phi, apar, bpar)
             fields_updated = .false.
          end if
 
@@ -171,5 +171,45 @@ contains
       if (proc0) call time_message(.false., time_gke(:, 9), ' implicit')
 
    end subroutine advance_distribution_function_using_implicit_gyrokinetic_terms
+
+   !****************************************************************************
+   !                  Hammett remap of g or of the canonical gbar
+   !****************************************************************************
+   ! The Hammett remap moves each k_y by one k_x cell once its drifted k_x has moved half a cell.  By default the
+   ! moved quantity is g, whose current gives A_par = j/k_perp^2, so A_par jumps by k_perp,old^2/k_perp,new^2 at each
+   ! shift (a factor ~2.6 at the smallest k_y with k_x = 0): an impulsive inductive E_par on the electrons.
+   ! With remap_gbar (and A_par included) the canonical gbar = g + (Z F0/T) 2 J0 v_par v_th A_par is moved instead.
+   ! Its current gives A_par = j/(k_perp^2 + skin-depth term), so A_par stays nearly continuous across the shift,
+   ! as in codes that evolve the canonical distribution (e.g. GENE).
+   ! Sequence: fields from g, g -> gbar, shift, fields from gbar, gbar -> g.  advance_fields returns at once if
+   ! fields_updated is set, so the flag is cleared before each solve.
+   !****************************************************************************
+   subroutine remap_flow_shear(g, phi, apar, bpar)
+
+      use parallelisation_layouts, only: vmu_lo
+      use grids_z, only: nzgrid
+      use parameters_physics, only: include_apar
+      use field_equations, only: advance_fields, fields_updated
+      use calculations_tofrom_ghf, only: gbar_to_g
+      use gk_flow_shear, only: advance_perp_flow_shear, perp_shift_pending, remap_gbar
+
+      implicit none
+
+      complex, dimension(:, :, -nzgrid:, :, vmu_lo%llim_proc:), intent(in out) :: g
+      complex, dimension(:, :, -nzgrid:, :), intent(in out) :: phi, apar, bpar
+
+      if (remap_gbar .and. include_apar .and. perp_shift_pending()) then
+         fields_updated = .false.
+         call advance_fields(g, phi, apar, bpar, dist='g')
+         call gbar_to_g(g, apar, -1.0)
+         call advance_perp_flow_shear(g)
+         fields_updated = .false.
+         call advance_fields(g, phi, apar, bpar, dist='gbar')
+         call gbar_to_g(g, apar, 1.0)
+      else
+         call advance_perp_flow_shear(g)
+      end if
+
+   end subroutine remap_flow_shear
 
 end module gyrokinetic_equation_implicit

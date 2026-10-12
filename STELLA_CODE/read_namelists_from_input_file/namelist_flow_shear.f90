@@ -10,6 +10,7 @@
 !     g_exb = 0.0
 !     g_exbfac = 1.0
 !     omprimfac = 1.0
+!     remap_gbar = .false.
 ! 
 ! For each namelists two (or three) routines exist:
 !    - set_default_parameters_<namelist>
@@ -41,7 +42,7 @@ contains
    !                               FLOW SHEAR TERMS                            !
    !****************************************************************************
    subroutine read_namelist_flow_shear(prp_shear_enabled, hammett_flow_shear, &
-      g_exb, g_exbfac, omprimfac)
+      g_exb, g_exbfac, omprimfac, remap_gbar)
 
       use mp, only: proc0
 
@@ -49,6 +50,7 @@ contains
 
       ! Variables that are read from the input file
       logical, intent(out) :: prp_shear_enabled, hammett_flow_shear 
+      logical, intent(out) :: remap_gbar
       real :: g_exb, g_exbfac, omprimfac
       
       !-------------------------------------------------------------------------
@@ -70,6 +72,7 @@ contains
          g_exb = 0.0
          g_exbfac = 1.0
          omprimfac = 1.0
+         remap_gbar = .false.
 
       end subroutine set_default_parameters_flow_shear
 
@@ -79,7 +82,7 @@ contains
          use file_utils, only: input_unit_exist
          implicit none
 
-         namelist /flow_shear/ prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac
+         namelist /flow_shear/ prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac, remap_gbar
          in_file = input_unit_exist('flow_shear', dexist)
          if (dexist) read (unit=in_file, nml=flow_shear)
 
@@ -100,6 +103,7 @@ contains
          write (unit, '(A, ES0.4)') '  g_exb = ', g_exb
          write (unit, '(A, ES0.4)') '  g_exbfac = ', g_exbfac
          write (unit, '(A, ES0.4)') '  omprimfac = ', omprimfac
+         write (unit, '(A, L1)') '  remap_gbar = ', remap_gbar
          write (unit, '(A)') '/'
          write (unit, '(A)') ''
 

@@ -56,6 +56,8 @@ module gk_flow_shear
    ! Input parameters
    public :: prp_shear_enabled               ! Enables perpendicular flow shear
    public :: hammett_flow_shear
+   public :: remap_gbar
+   public :: perp_shift_pending
    public :: g_exb, g_exbfac, omprimfac 
 
    private
@@ -68,6 +70,9 @@ module gk_flow_shear
    ! Input parameters
    logical :: prp_shear_enabled
    logical :: hammett_flow_shear 
+   ! remap_gbar: in electromagnetic runs, apply the Hammett remap to the canonical gbar instead of g
+   ! (see remap_flow_shear in gyrokinetic_equation_implicit.f90).  Default .false., the original behaviour.
+   logical :: remap_gbar
    real :: g_exb, g_exbfac, omprimfac
    
    ! Parallel flow shear
@@ -95,7 +100,7 @@ contains
       !-------------------------------------------------------------------------
       
       ! Read the "flow_shear" namelist in the input file
-      call read_namelist_flow_shear(prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac)
+      call read_namelist_flow_shear(prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac, remap_gbar)
       
       ! Broadcast the input parameters
       call broadcast(prp_shear_enabled)
@@ -103,6 +108,7 @@ contains
       call broadcast(g_exb)
       call broadcast(g_exbfac)
       call broadcast(omprimfac)
+      call broadcast(remap_gbar)
 
    end subroutine read_parameters_flow_shear
 
@@ -332,6 +338,24 @@ contains
    !****************************************************************************
    !                      Advance perpendicular flow shear                      
    !****************************************************************************
+   !****************************************************************************
+   !                       Is a Hammett shift due this call?
+   !****************************************************************************
+   ! True if advance_perp_flow_shear will move some non-zonal k_y by one k_x cell on its next call (the same test
+   ! as in its Hammett branch).  Used by remap_flow_shear to shift gbar instead of g when remap_gbar is set.
+   logical function perp_shift_pending()
+      use grids_kxky, only: naky, zonal_mode
+      use arrays, only: shift_state
+      implicit none
+      integer :: iky
+      perp_shift_pending = .false.
+      if (.not. (prp_shear_enabled .and. hammett_flow_shear)) return
+      do iky = 1, naky
+         if (zonal_mode(iky)) cycle
+         if (shift_state(iky) > 0.5 * shift_times(iky)) perp_shift_pending = .true.
+      end do
+   end function perp_shift_pending
+
    subroutine advance_perp_flow_shear(g)
 
       ! Parallelisation
