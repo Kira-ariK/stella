@@ -36,6 +36,8 @@
 !   - pflux(t, s)  -->  pflux_vs_s in the NetCDF file, and written to *.fluxes
 !   - qflux(t, s)  -->  qflux_vs_s in the NetCDF file, and written to *.fluxes
 !   - vflux(t, s)  -->  vflux_vs_s in the NetCDF file, and written to *.fluxes
+!   - qflux(t, s) split by field (flux tube only), in the NetCDF file:
+!       qflux_phi_vs_s (ExB), qflux_apar_vs_s (magnetic flutter), qflux_bpar_vs_s
 ! 
 ! If <write_fluxes_kxky> = .true. the flux spectra are calculated, note that these
 ! do not represent the Fourier components of the fluxes, but rather the contribution 
@@ -44,6 +46,8 @@
 !   - pflux(t, kx, ky, s)  -->  pflux_vs_kxkys in the NetCDF file
 !   - qflux(t, kx, ky, s)  -->  qflux_vs_kxkys in the NetCDF file
 !   - vflux(t, kx, ky, s)  -->  vflux_vs_kxkys in the NetCDF file
+!   - qflux(t, kx, ky, s) split by field (flux tube only), in the NetCDF file:
+!       qflux_phi_vs_kxkys (ExB), qflux_apar_vs_kxkys (magnetic flutter), qflux_bpar_vs_kxkys
 !   
 ! If <write_fluxes_kxkyz> = .true. the following quantities are calculated:
 !   - pflux(t, kx, ky, z, s)  -->  pflux_vs_kxkyzs in the NetCDF file
@@ -85,6 +89,9 @@ module diagnostics_fluxes
    ! When writing the netcdf data, remember the fluxes versus time for the ascii file
    real, dimension(:), allocatable :: pflux_vs_s, qflux_vs_s, vflux_vs_s
 
+   ! Heat flux split by field, qflux(s,field) with field = phi (ExB), apar (flutter), bpar
+   real, dimension(:, :), allocatable :: qflux_vs_sf
+
 contains
 
 !###############################################################################
@@ -120,6 +127,8 @@ contains
       use write_diagnostics_to_netcdf, only: write_fluxes_kxkyzs_nc
       use write_diagnostics_to_netcdf, only: write_fluxes_kxkys_nc
       use write_diagnostics_to_netcdf, only: write_fluxes_vs_time_nc
+      use write_diagnostics_to_netcdf, only: write_qflux_byfield_vs_time_nc
+      use write_diagnostics_to_netcdf, only: write_qflux_byfield_kxkys_nc
 
       implicit none
 
@@ -130,6 +139,7 @@ contains
       ! We want to write flux(ky,kx,z,tube,s) and flux(ky,kx,s) to the netcdf file
       real, dimension(:, :, :, :, :), allocatable :: pflux_vs_kxkyzts, vflux_vs_kxkyzts, qflux_vs_kxkyzts
       real, dimension(:, :, :), allocatable :: pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys
+      real, dimension(:, :, :, :), allocatable :: qflux_vs_kxkysf
 
       !-------------------------------------------------------------------------
       
@@ -149,6 +159,7 @@ contains
          allocate (pflux_vs_kxkys(naky, nakx, nspec)); pflux_vs_kxkys = 0.0
          allocate (qflux_vs_kxkys(naky, nakx, nspec)); qflux_vs_kxkys = 0.0
          allocate (vflux_vs_kxkys(naky, nakx, nspec)); vflux_vs_kxkys = 0.0
+         allocate (qflux_vs_kxkysf(naky, nakx, nspec, 3)); qflux_vs_kxkysf = 0.0
       end if
       
       !*************************************************************************
@@ -174,7 +185,8 @@ contains
       ! Calculate the fluxes for a flux tube simulation
       if (.not. full_flux_surface) then 
          if (debug) write (*, *) 'diagnostics::diagnostics_fluxes::write_fluxes_for_fluxtube' 
-         call write_fluxes_for_fluxtube(pflux_vs_kxkyzts, vflux_vs_kxkyzts, qflux_vs_kxkyzts, pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys)
+         call write_fluxes_for_fluxtube(pflux_vs_kxkyzts, vflux_vs_kxkyzts, qflux_vs_kxkyzts, pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys, &
+               qflux_vs_kxkysf)
       end if
 
       ! Write fluxes to the ascii files (these variables have been set along the way)
@@ -198,12 +210,14 @@ contains
       if (write_fluxes_vs_time) then 
          if (debug) write (*, *) 'diagnostics::diagnostics_fluxes::write_fluxes_nc'
          if (proc0) call write_fluxes_vs_time_nc(nout, pflux_vs_s, vflux_vs_s, qflux_vs_s)
+         if (proc0 .and. .not. full_flux_surface) call write_qflux_byfield_vs_time_nc(nout, qflux_vs_sf)
       end if
 
       ! Write fluxes(kx,ky,s) to the netcdf file
       if (write_fluxes_kxky) then 
          if (debug) write (*, *) 'diagnostics::diagnostics_fluxes::write_fluxes_kxky_nc'
          if (proc0) call write_fluxes_kxkys_nc(nout, pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys)
+         if (proc0 .and. .not. full_flux_surface) call write_qflux_byfield_kxkys_nc(nout, qflux_vs_kxkysf)
       end if
 
       ! Write fluxes(kx,ky,z,s) to the netcdf file
@@ -219,6 +233,7 @@ contains
       if (allocated(pflux_vs_kxkys)) deallocate (pflux_vs_kxkys)
       if (allocated(vflux_vs_kxkys)) deallocate (vflux_vs_kxkys)
       if (allocated(qflux_vs_kxkys)) deallocate (qflux_vs_kxkys)
+      if (allocated(qflux_vs_kxkysf)) deallocate (qflux_vs_kxkysf)
 
       ! End timer
       if (proc0) call time_message(.false., timer(:), 'Write fluxes')
@@ -228,7 +243,8 @@ contains
    !============================================================================
    !================================ FLUX TUBE =================================
    !============================================================================
-   subroutine write_fluxes_for_fluxtube(pflux_vs_kxkyzts, vflux_vs_kxkyzts, qflux_vs_kxkyzts, pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys)
+   subroutine write_fluxes_for_fluxtube(pflux_vs_kxkyzts, vflux_vs_kxkyzts, qflux_vs_kxkyzts, pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys, &
+         qflux_vs_kxkysf)
    
       ! Flags
       use parameters_physics, only: include_apar, include_bpar
@@ -251,6 +267,7 @@ contains
       ! We want to write flux(ky,kx,z,tube,s) to the netcdf file
       real, dimension(:, :, :, :, :), intent(out) :: pflux_vs_kxkyzts, vflux_vs_kxkyzts, qflux_vs_kxkyzts
       real, dimension(:, :, :), intent(out) :: pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys
+      real, dimension(:, :, :, :), intent(out) :: qflux_vs_kxkysf
 
       !-------------------------------------------------------------------------
 
@@ -273,7 +290,8 @@ contains
 
       ! Now calculate the fluxes explicitly
       call calculate_fluxes_fluxtube(gvmu, pflux_vs_s, vflux_vs_s, qflux_vs_s, &
-                pflux_vs_kxkyzts, vflux_vs_kxkyzts, qflux_vs_kxkyzts, pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys)
+                pflux_vs_kxkyzts, vflux_vs_kxkyzts, qflux_vs_kxkyzts, pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys, &
+                qflux_vs_sf, qflux_vs_kxkysf)
 
       ! Convert <δf> back to <g> since it will be used by other routines 
       ! TODO-GA for electromagnetic stella the equations are written for f, for electromagnetic stella the equations are written for h
@@ -509,6 +527,7 @@ contains
       allocate (qflux_vs_s(nspec)); qflux_vs_s = 0.
       allocate (pflux_vs_s(nspec)); pflux_vs_s = 0.
       allocate (vflux_vs_s(nspec)); vflux_vs_s = 0.
+      allocate (qflux_vs_sf(nspec, 3)); qflux_vs_sf = 0.
 
       ! We only open the ascii file on the first processor
       if (.not. proc0) return
@@ -535,6 +554,7 @@ contains
       if (allocated(qflux_vs_s)) deallocate (qflux_vs_s)
       if (allocated(pflux_vs_s)) deallocate (pflux_vs_s)
       if (allocated(vflux_vs_s)) deallocate (vflux_vs_s)
+      if (allocated(qflux_vs_sf)) deallocate (qflux_vs_sf)
 
       ! Close the ascii file
       call close_output_file(fluxes_unit)

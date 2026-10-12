@@ -57,6 +57,8 @@
 !   - pflux(t, kx, ky, s)           -->      pflux_vs_kxkys
 !   - qflux(t, kx, ky, s)           -->      qflux_vs_kxkys
 !   - vflux(t, kx, ky, s)           -->      vflux_vs_kxkys
+!   - qflux(t, s) by field          -->      qflux_phi_vs_s, qflux_apar_vs_s, qflux_bpar_vs_s
+!   - qflux(t, kx, ky, s) by field  -->      qflux_phi_vs_kxkys, qflux_apar_vs_kxkys, qflux_bpar_vs_kxkys
 !   - pflux(t, kx, ky, z, s)        -->      pflux_vs_kxkyzs
 !   - qflux(t, kx, ky, z, s)        -->      qflux_vs_kxkyzs
 !   - vflux(t, kx, ky, z, s)        -->      vflux_vs_kxkyzs
@@ -130,6 +132,7 @@ module write_diagnostics_to_netcdf
    public :: write_apar2_nc
    public :: write_bpar2_nc
    public :: write_fluxes_vs_time_nc
+   public :: write_qflux_byfield_vs_time_nc
    
    ! Write full (kx,ky,z,t) data
    public :: write_phi_nc
@@ -169,6 +172,7 @@ module write_diagnostics_to_netcdf
    public :: write_radial_moments_nc
    public :: write_fluxes_kxkyzs_nc
    public :: write_fluxes_kxkys_nc
+   public :: write_qflux_byfield_kxkys_nc
    public :: get_nout
    public :: sync_nc
 
@@ -838,6 +842,52 @@ contains
          long_name="Heat flux(ky,kx,s,t)")
 #endif
    end subroutine write_fluxes_kxkys_nc
+
+   !-------------------- qflux(s,t) split by field --------------------
+   ! <qflux_vs_sf>(s, field) with field = 1 (phi, ExB), 2 (apar, flutter), 3 (bpar)
+   subroutine write_qflux_byfield_vs_time_nc(nout, qflux_vs_sf)
+      use parameters_physics, only: include_apar, include_bpar
+      implicit none
+      integer, intent(in) :: nout
+      real, dimension(:, :), intent(in) :: qflux_vs_sf
+#ifdef NETCDF
+      call neasyf_write(ncid, "qflux_phi_vs_s", qflux_vs_sf(:, 1), &
+         dim_names=[character(len=7)::"species", "t"], start=[1, nout], &
+         units="n_ref * T_ref * v_ref * (rho_ref/a_ref)^2", &
+         long_name="Heat flux(s,t), ExB (phi) contribution")
+      if (include_apar) call neasyf_write(ncid, "qflux_apar_vs_s", qflux_vs_sf(:, 2), &
+         dim_names=[character(len=7)::"species", "t"], start=[1, nout], &
+         units="n_ref * T_ref * v_ref * (rho_ref/a_ref)^2", &
+         long_name="Heat flux(s,t), magnetic flutter (apar) contribution")
+      if (include_bpar) call neasyf_write(ncid, "qflux_bpar_vs_s", qflux_vs_sf(:, 3), &
+         dim_names=[character(len=7)::"species", "t"], start=[1, nout], &
+         units="n_ref * T_ref * v_ref * (rho_ref/a_ref)^2", &
+         long_name="Heat flux(s,t), compressional (bpar) contribution")
+#endif
+   end subroutine write_qflux_byfield_vs_time_nc
+
+   !----------------- qflux(ky,kx,s,t) split by field -----------------
+   ! <qflux_vs_kxkysf>(ky, kx, s, field) with field = 1 (phi, ExB), 2 (apar, flutter), 3 (bpar)
+   subroutine write_qflux_byfield_kxkys_nc(nout, qflux_vs_kxkysf)
+      use parameters_physics, only: include_apar, include_bpar
+      implicit none
+      integer, intent(in) :: nout
+      real, dimension(:, :, :, :), intent(in) :: qflux_vs_kxkysf
+#ifdef NETCDF
+      call neasyf_write(ncid, "qflux_phi_vs_kxkys", qflux_vs_kxkysf(:, :, :, 1), &
+         dim_names=[character(len=7)::"ky", "kx", "species", "t"], start=[1, 1, 1, nout], &
+         units="n_ref * T_ref * v_ref * (rho_ref/a_ref)^2", &
+         long_name="Heat flux(ky,kx,s,t), ExB (phi) contribution")
+      if (include_apar) call neasyf_write(ncid, "qflux_apar_vs_kxkys", qflux_vs_kxkysf(:, :, :, 2), &
+         dim_names=[character(len=7)::"ky", "kx", "species", "t"], start=[1, 1, 1, nout], &
+         units="n_ref * T_ref * v_ref * (rho_ref/a_ref)^2", &
+         long_name="Heat flux(ky,kx,s,t), magnetic flutter (apar) contribution")
+      if (include_bpar) call neasyf_write(ncid, "qflux_bpar_vs_kxkys", qflux_vs_kxkysf(:, :, :, 3), &
+         dim_names=[character(len=7)::"ky", "kx", "species", "t"], start=[1, 1, 1, nout], &
+         units="n_ref * T_ref * v_ref * (rho_ref/a_ref)^2", &
+         long_name="Heat flux(ky,kx,s,t), compressional (bpar) contribution")
+#endif
+   end subroutine write_qflux_byfield_kxkys_nc
 
    !-------------------------- flux(ky,kx,z,tube,s,t) --------------------------
    subroutine write_fluxes_kxkyzs_nc(nout, pflux_kxkyzts, vflux_kxkyzts, qflux_kxkyzts)

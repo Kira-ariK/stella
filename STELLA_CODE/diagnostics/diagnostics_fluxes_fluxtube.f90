@@ -94,7 +94,8 @@ contains
    ! <qflux> or <pflux>, but it does matter for <vflux>! Only <δf> is the correct options for <vflux> TODO is it? 
    !============================================================================
    subroutine calculate_fluxes_fluxtube(df_vs_vpamuikxkyzs, pflux_vs_s, vflux_vs_s, qflux_vs_s, &
-      pflux_vs_kxkyzts, vflux_vs_kxkyzts, qflux_vs_kxkyzts, pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys)
+      pflux_vs_kxkyzts, vflux_vs_kxkyzts, qflux_vs_kxkyzts, pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys, &
+      qflux_vs_sf, qflux_vs_kxkysf)
 
       ! Flags
       use parameters_physics, only: include_apar, include_bpar
@@ -143,23 +144,33 @@ contains
       real, dimension(:, :, :), intent(out) :: pflux_vs_kxkys, vflux_vs_kxkys, qflux_vs_kxkys
       real, dimension(:), intent(out) :: pflux_vs_s, vflux_vs_s, qflux_vs_s
 
+      ! Return the heat flux split by field, qflux(s,field) and qflux(ky,kx,s,field), with
+      ! field = 1 (phi, ExB), 2 (apar, magnetic flutter), 3 (bpar, compressional)
+      real, dimension(:, :), intent(out) :: qflux_vs_sf
+      real, dimension(:, :, :, :), intent(out) :: qflux_vs_kxkysf
+
       ! Local variables
       complex, dimension(:, :), allocatable :: velocityintegrand_vs_vpamu, temp1_vs_vpamu, temp2_vs_vpamu
-      integer :: ikxkyz, iky, ikx, iz, it, is, ia
+      real, dimension(:, :, :, :, :, :), allocatable :: qflux_vs_kxkyztsf
+      integer :: ikxkyz, iky, ikx, iz, it, is, ia, ifield
       logical :: write_vs_kxkyz
       real :: prefac
+      integer, parameter :: iphi = 1, iapar = 2, ibpar = 3
 
       !-------------------------------------------------------------------------
 
       ! Allocate arrays
       allocate (velocityintegrand_vs_vpamu(nvpa, nmu), temp1_vs_vpamu(nvpa, nmu), temp2_vs_vpamu(nvpa, nmu))
-      
-      ! Track the code 
+      allocate (qflux_vs_kxkyztsf(size(qflux_vs_kxkyzts, 1), size(qflux_vs_kxkyzts, 2), -nzgrid:nzgrid, &
+                size(qflux_vs_kxkyzts, 4), size(qflux_vs_kxkyzts, 5), 3))
+
+      ! Track the code
       if (debug) write (*, *) 'diagnostics::diagnostics_fluxes_fluxtube::calculate_fluxes_fluxtube'
 
       ! Make sure that the ararys we will fill are empty
       pflux_vs_s = 0.; vflux_vs_s = 0.; qflux_vs_s = 0.
       pflux_vs_kxkyzts = 0.; vflux_vs_kxkyzts = 0.; qflux_vs_kxkyzts = 0.
+      qflux_vs_sf = 0.; qflux_vs_kxkysf = 0.; qflux_vs_kxkyztsf = 0.
 
       ! Define the factor in front of the defintion of the fluxes
       ! If <flux_norm> = True, we include the factor <∇̃ρ>_ψ in the flux definition, otherwise we ignore it 
@@ -203,9 +214,9 @@ contains
             ! For the heat flux we have <VELOCITY_INTEGRAND>(vpa,mu) = h(mu,vpa)*J0*v^2
             ! Add the contribution (-sgn(psi_t)*(k̃_y/2)*Im[conj(phi)*integrate_vmu(VELOCITY_INTEGRAND)]*NORM) to the heat flux 
             velocityintegrand_vs_vpamu = velocityintegrand_vs_vpamu * (spread(vpa**2, 2, nmu) + spread(vperp2(1, iz, :), 1, nvpa))
-            call get_one_flux(iky, iz, fluxnorm_vs_z(iz), velocityintegrand_vs_vpamu, phi(iky, ikx, iz, it), qflux_vs_s(is))
+            call get_one_flux(iky, iz, fluxnorm_vs_z(iz), velocityintegrand_vs_vpamu, phi(iky, ikx, iz, it), qflux_vs_sf(is, iphi))
             if (write_vs_kxkyz) call get_one_flux(iky, iz, prefac, velocityintegrand_vs_vpamu, &
-                  phi(iky, ikx, iz, it), qflux_vs_kxkyzts(iky, ikx, iz, it, is))
+                  phi(iky, ikx, iz, it), qflux_vs_kxkyztsf(iky, ikx, iz, it, is, iphi))
 
             ! For the parallel (first term) and perpendicular (second term) component of the momentum flux we have,
             ! <VELOCITY_INTEGRAND>(vpa,mu) = δf*J0*vpa*(b.∇ζ)*R^2 
@@ -255,9 +266,9 @@ contains
 
             ! Apar contribution to heat flux
             velocityintegrand_vs_vpamu = velocityintegrand_vs_vpamu * (spread(vpa**2, 2, nmu) + spread(vperp2(ia, iz, :), 1, nvpa))
-            call get_one_flux(iky, iz, fluxnorm_vs_z(iz), velocityintegrand_vs_vpamu, apar(iky, ikx, iz, it), qflux_vs_s(is))
-            if (write_vs_kxkyz) call get_one_flux(iky, iz, prefac, velocityintegrand_vs_vpamu, & 
-               apar(iky, ikx, iz, it), qflux_vs_kxkyzts(iky, ikx, iz, it, is))
+            call get_one_flux(iky, iz, fluxnorm_vs_z(iz), velocityintegrand_vs_vpamu, apar(iky, ikx, iz, it), qflux_vs_sf(is, iapar))
+            if (write_vs_kxkyz) call get_one_flux(iky, iz, prefac, velocityintegrand_vs_vpamu, &
+               apar(iky, ikx, iz, it), qflux_vs_kxkyztsf(iky, ikx, iz, it, is, iapar))
 
             ! TODO -- NEED TO ADD IN CONTRIBUTION FROM BOLTZMANN PIECE !! Only valid for axis-symmetric devices now
             ! Apar contribution to the parallel (first term) and perpendicular (second term) component of the momentum flux
@@ -295,8 +306,8 @@ contains
 
             ! Bpar contribution to heat flux
             velocityintegrand_vs_vpamu = velocityintegrand_vs_vpamu * (spread(vpa**2, 2, nmu) + spread(vperp2(ia, iz, :), 1, nvpa))
-            call get_one_flux(iky, iz, fluxnorm_vs_z(iz), velocityintegrand_vs_vpamu, bpar(iky, ikx, iz, it), qflux_vs_s(is))
-            call get_one_flux(iky, iz, prefac, velocityintegrand_vs_vpamu, bpar(iky, ikx, iz, it), qflux_vs_kxkyzts(iky, ikx, iz, it, is))
+            call get_one_flux(iky, iz, fluxnorm_vs_z(iz), velocityintegrand_vs_vpamu, bpar(iky, ikx, iz, it), qflux_vs_sf(is, ibpar))
+            call get_one_flux(iky, iz, prefac, velocityintegrand_vs_vpamu, bpar(iky, ikx, iz, it), qflux_vs_kxkyztsf(iky, ikx, iz, it, is, ibpar))
 
             ! Bpar contribution to momentum flux
             ! NOT SUPPORTED, REQUIRES d J1(x)/ d x 
@@ -310,44 +321,64 @@ contains
          end do
       end if
 
+      ! The total heat flux is the sum of the phi, apar and bpar contributions
+      qflux_vs_s = sum(qflux_vs_sf, dim=2)
+      qflux_vs_kxkyzts = sum(qflux_vs_kxkyztsf, dim=6)
+
       ! Sum the values on all processors and send them to <proc0>
       call sum_reduce(pflux_vs_s, 0)
       call sum_reduce(qflux_vs_s, 0)
       call sum_reduce(vflux_vs_s, 0)
+      call sum_reduce(qflux_vs_sf, 0)
 
       ! Add the CONSTANT to the fluxes (ñ_s for pflux; ñ_s*T̃_s for qflux and ñ_s*√(m̃_s*T̃_s) for vflux) 
       pflux_vs_s = pflux_vs_s * spec%dens_psi0
       qflux_vs_s = qflux_vs_s * spec%dens_psi0 * spec%temp_psi0
       vflux_vs_s = vflux_vs_s * spec%dens_psi0 * sqrt(spec%mass * spec%temp_psi0)
+      do ifield = 1, 3
+         qflux_vs_sf(:, ifield) = qflux_vs_sf(:, ifield) * spec%dens_psi0 * spec%temp_psi0
+      end do
 
       ! Normalise to account for contributions from multiple flux tubes in a flux tube train
       pflux_vs_s = pflux_vs_s / real(ntubes)
       qflux_vs_s = qflux_vs_s / real(ntubes)
       vflux_vs_s = vflux_vs_s / real(ntubes)
+      qflux_vs_sf = qflux_vs_sf / real(ntubes)
 
       ! Sum the values on all processors and send them to <proc0>
       call sum_reduce(pflux_vs_kxkyzts, 0)
       call sum_reduce(qflux_vs_kxkyzts, 0)
-      call sum_reduce(vflux_vs_kxkyzts, 0) 
+      call sum_reduce(vflux_vs_kxkyzts, 0)
 
-      ! Add the CONSTANT to the fluxes (ñ_s for pflux; ñ_s*T̃_s for qflux and ñ_s*√(m̃_s*T̃_s) for vflux) 
+      ! Add the CONSTANT to the fluxes (ñ_s for pflux; ñ_s*T̃_s for qflux and ñ_s*√(m̃_s*T̃_s) for vflux)
       do is = 1, nspec
          pflux_vs_kxkyzts(:, :, :, :, is) = pflux_vs_kxkyzts(:, :, :, :, is) * spec(is)%dens_psi0
          qflux_vs_kxkyzts(:, :, :, :, is) = qflux_vs_kxkyzts(:, :, :, :, is) * spec(is)%dens_psi0 * spec(is)%temp_psi0
          vflux_vs_kxkyzts(:, :, :, :, is) = vflux_vs_kxkyzts(:, :, :, :, is) * spec(is)%dens_psi0 * sqrt(spec(is)%mass * spec(is)%temp_psi0)
       end do
 
-      ! Field line average will average over <z> and <tube> 
-      if (write_fluxes_kxky) then 
+      ! Field line average will average over <z> and <tube>
+      if (write_fluxes_kxky) then
          do is = 1, nspec
             call fieldline_average(pflux_vs_kxkyzts(:, :, :, :, is), pflux_vs_kxkys(:, :, is))
             call fieldline_average(qflux_vs_kxkyzts(:, :, :, :, is), qflux_vs_kxkys(:, :, is))
-            call fieldline_average(vflux_vs_kxkyzts(:, :, :, :, is), vflux_vs_kxkys(:, :, is)) 
+            call fieldline_average(vflux_vs_kxkyzts(:, :, :, :, is), vflux_vs_kxkys(:, :, is))
+         end do
+
+         ! Repeat for the heat flux split by field
+         do ifield = 1, 3
+            call sum_reduce(qflux_vs_kxkyztsf(:, :, :, :, :, ifield), 0)
+            do is = 1, nspec
+               qflux_vs_kxkyztsf(:, :, :, :, is, ifield) = qflux_vs_kxkyztsf(:, :, :, :, is, ifield) &
+                     * spec(is)%dens_psi0 * spec(is)%temp_psi0
+               call fieldline_average(qflux_vs_kxkyztsf(:, :, :, :, is, ifield), qflux_vs_kxkysf(:, :, is, ifield))
+            end do
          end do
       end if
 
       ! Deallocate the arrays
       deallocate (velocityintegrand_vs_vpamu, temp1_vs_vpamu, temp2_vs_vpamu)
+      deallocate (qflux_vs_kxkyztsf)
       
       ! Track code
       if (debug) write (*, *) 'diagnostics::diagnostics_fluxes_fluxtube::calculate_fluxes_fluxtube::finished'
