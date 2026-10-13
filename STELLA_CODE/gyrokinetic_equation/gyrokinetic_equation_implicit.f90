@@ -173,16 +173,18 @@ contains
    end subroutine advance_distribution_function_using_implicit_gyrokinetic_terms
 
    !****************************************************************************
-   !                  Hammett remap of g or of the canonical gbar
+   !                  Hammett remap in electromagnetic runs (remap_em)
    !****************************************************************************
-   ! The Hammett remap moves each k_y by one k_x cell once its drifted k_x has moved half a cell.  By default the
-   ! moved quantity is g, whose current gives A_par = j/k_perp^2, so A_par jumps by k_perp,old^2/k_perp,new^2 at each
-   ! shift (a factor ~2.6 at the smallest k_y with k_x = 0): an impulsive inductive E_par on the electrons.
-   ! With remap_gbar (and A_par included) the canonical gbar = g + (Z F0/T) 2 J0 v_par v_th A_par is moved instead.
-   ! Its current gives A_par = j/(k_perp^2 + skin-depth term), so A_par stays nearly continuous across the shift,
-   ! as in codes that evolve the canonical distribution (e.g. GENE).
-   ! Sequence: fields from g, g -> gbar, shift, fields from gbar, gbar -> g.  advance_fields returns at once if
-   ! fields_updated is set, so the flag is cleared before each solve.
+   ! The Hammett remap moves each k_y by one k_x cell once its drifted k_x has moved half a cell.  With c = (Z F0/T)
+   ! 2 v_par v_th and gbar = g + c J0 A_par:
+   !   remap_em = 0 (original): g -> shift(g); A_par = j/k_perp^2 with the new k_perp, so A_par jumps by
+   !     k_perp,old^2/k_perp,new^2 (~2.6 at the smallest k_y and k_x = 0): an impulsive inductive E_par.
+   !   remap_em = 1: shift gbar built at the old cell; A_par = j/(k_perp^2 + skin term) stays nearly continuous,
+   !     but g keeps c [J0(k_old) A_par,old - J0(k_new) A_par,new], mixing the J0 of two cells.
+   !   remap_em = 2: shift g, carry A_par with its mode, build gbar at the new cell from the carried A_par, solve
+   !     A_par from gbar, rebuild g: g -> shift(g) + c J0(k_new) [A_par,carried - A_par,new].  A_par nearly
+   !     continuous, one J0 only.
+   ! advance_fields returns at once if fields_updated is set, so the flag is cleared before each solve.
    !****************************************************************************
    subroutine remap_flow_shear(g, phi, apar, bpar)
 
@@ -191,24 +193,40 @@ contains
       use parameters_physics, only: include_apar
       use field_equations, only: advance_fields, fields_updated
       use calculations_tofrom_ghf, only: gbar_to_g
-      use gk_flow_shear, only: advance_perp_flow_shear, perp_shift_pending, remap_gbar
+      use gk_flow_shear, only: advance_perp_flow_shear, perp_shift_pending, remap_em, shift_field_hammett
 
       implicit none
 
       complex, dimension(:, :, -nzgrid:, :, vmu_lo%llim_proc:), intent(in out) :: g
       complex, dimension(:, :, -nzgrid:, :), intent(in out) :: phi, apar, bpar
+      complex, dimension(:, :, :, :), allocatable :: apar_s
 
-      if (remap_gbar .and. include_apar .and. perp_shift_pending()) then
-         fields_updated = .false.
-         call advance_fields(g, phi, apar, bpar, dist='g')
+      if (remap_em == 0 .or. .not. include_apar .or. .not. perp_shift_pending()) then
+         call advance_perp_flow_shear(g)
+         return
+      end if
+
+      fields_updated = .false.
+      call advance_fields(g, phi, apar, bpar, dist='g')
+
+      select case (remap_em)
+      case (1)
          call gbar_to_g(g, apar, -1.0)
          call advance_perp_flow_shear(g)
-         fields_updated = .false.
-         call advance_fields(g, phi, apar, bpar, dist='gbar')
-         call gbar_to_g(g, apar, 1.0)
-      else
+      case (2)
+         allocate (apar_s, source=apar)
+         call shift_field_hammett(apar_s)
          call advance_perp_flow_shear(g)
-      end if
+         call gbar_to_g(g, apar_s, -1.0)
+         deallocate (apar_s)
+      case default
+         call advance_perp_flow_shear(g)
+         return
+      end select
+
+      fields_updated = .false.
+      call advance_fields(g, phi, apar, bpar, dist='gbar')
+      call gbar_to_g(g, apar, 1.0)
 
    end subroutine remap_flow_shear
 

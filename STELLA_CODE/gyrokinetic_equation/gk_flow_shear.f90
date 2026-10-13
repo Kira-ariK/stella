@@ -56,7 +56,8 @@ module gk_flow_shear
    ! Input parameters
    public :: prp_shear_enabled               ! Enables perpendicular flow shear
    public :: hammett_flow_shear
-   public :: remap_gbar
+   public :: remap_em
+   public :: shift_field_hammett
    public :: perp_shift_pending
    public :: g_exb, g_exbfac, omprimfac 
 
@@ -70,9 +71,10 @@ module gk_flow_shear
    ! Input parameters
    logical :: prp_shear_enabled
    logical :: hammett_flow_shear 
-   ! remap_gbar: in electromagnetic runs, apply the Hammett remap to the canonical gbar instead of g
-   ! (see remap_flow_shear in gyrokinetic_equation_implicit.f90).  Default .false., the original behaviour.
-   logical :: remap_gbar
+   ! remap_em: what the Hammett remap moves in electromagnetic runs (see remap_flow_shear in
+   ! gyrokinetic_equation_implicit.f90).  0 = g (original, default); 1 = the canonical gbar;
+   ! 2 = g, with A_par carried with its mode and gbar rebuilt at the new cell (A_par continuous).
+   integer :: remap_em
    real :: g_exb, g_exbfac, omprimfac
    
    ! Parallel flow shear
@@ -100,7 +102,7 @@ contains
       !-------------------------------------------------------------------------
       
       ! Read the "flow_shear" namelist in the input file
-      call read_namelist_flow_shear(prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac, remap_gbar)
+      call read_namelist_flow_shear(prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac, remap_em)
       
       ! Broadcast the input parameters
       call broadcast(prp_shear_enabled)
@@ -108,7 +110,7 @@ contains
       call broadcast(g_exb)
       call broadcast(g_exbfac)
       call broadcast(omprimfac)
-      call broadcast(remap_gbar)
+      call broadcast(remap_em)
 
    end subroutine read_parameters_flow_shear
 
@@ -342,7 +344,7 @@ contains
    !                       Is a Hammett shift due this call?
    !****************************************************************************
    ! True if advance_perp_flow_shear will move some non-zonal k_y by one k_x cell on its next call (the same test
-   ! as in its Hammett branch).  Used by remap_flow_shear to shift gbar instead of g when remap_gbar is set.
+   ! as in its Hammett branch).  Used by remap_flow_shear for the remap_em options (A_par-continuous remaps).
    logical function perp_shift_pending()
       use grids_kxky, only: naky, zonal_mode
       use arrays, only: shift_state
@@ -355,6 +357,40 @@ contains
          if (shift_state(iky) > 0.5 * shift_times(iky)) perp_shift_pending = .true.
       end do
    end function perp_shift_pending
+
+   !****************************************************************************
+   !              Move a field one k_x cell, exactly as the remap moves g
+   !****************************************************************************
+   ! Same test and index statements as the Hammett branch of advance_perp_flow_shear, applied to a field
+   ! (k_y, k_x, z, tube).  Must be called before advance_perp_flow_shear, which updates shift_state.
+   subroutine shift_field_hammett(fld)
+      use grids_z, only: nzgrid, ntubes
+      use grids_kxky, only: naky, nakx, ikx_max, zonal_mode
+      use arrays, only: shift_state
+      implicit none
+      complex, dimension(:, :, -nzgrid:, :), intent(in out) :: fld
+      integer :: iky, iz, it
+      if (.not. (prp_shear_enabled .and. hammett_flow_shear)) return
+      do it = 1, ntubes
+         do iz = -nzgrid, nzgrid
+            do iky = 1, naky
+               if (zonal_mode(iky)) cycle
+               if (shift_state(iky) > 0.5 * shift_times(iky)) then
+                  if (shift_sign < 0) then
+                     fld(iky, (ikx_max + 1):(nakx - 1), iz, it) = fld(iky, ikx_max + 2:, iz, it)
+                     fld(iky, nakx, iz, it) = fld(iky, 1, iz, it)
+                     fld(iky, :ikx_max - 1, iz, it) = fld(iky, 2:ikx_max, iz, it)
+                  else
+                     fld(iky, 2:ikx_max, iz, it) = fld(iky, 1:(ikx_max - 1), iz, it)
+                     fld(iky, 1, iz, it) = fld(iky, nakx, iz, it)
+                     fld(iky, ikx_max + 2:, iz, it) = fld(iky, (ikx_max + 1):(nakx - 1), iz, it)
+                  end if
+                  fld(iky, shift_start, iz, it) = 0.
+               end if
+            end do
+         end do
+      end do
+   end subroutine shift_field_hammett
 
    subroutine advance_perp_flow_shear(g)
 
