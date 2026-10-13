@@ -209,7 +209,7 @@ contains
       logical, dimension(:), allocatable :: shifted
       integer :: iky
 
-      if (remap_em == 0 .or. .not. include_apar .or. .not. perp_shift_pending()) then
+      if (remap_em == 0 .or. remap_em == 3 .or. .not. include_apar .or. .not. perp_shift_pending()) then
          call advance_perp_flow_shear(g)
          return
       end if

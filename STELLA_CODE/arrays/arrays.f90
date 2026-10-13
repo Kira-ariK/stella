@@ -40,6 +40,7 @@ module arrays
    
    ! Geometric quantities vs (naky, nakx, nalpha, -nzgrid:nzgrid)
    public :: kperp2
+   public :: kperp2_true, use_kperp2_true
    public :: dkperp2dr
 
    ! For radial variations and sources
@@ -107,6 +108,10 @@ module arrays
 
    ! Geometric quantities vs (naky, nakx, nalpha, -nzgrid:nzgrid)
    real, dimension(:, :, :, :), allocatable :: kperp2
+   ! kperp2_true: |k_perp|^2 at each mode's drifted k_x under flow shear (Hammett remap), used for A_par when
+   ! remap_em = 3 (use_kperp2_true); filled and updated in gk_flow_shear.
+   real, dimension(:, :, :, :), allocatable :: kperp2_true
+   logical :: use_kperp2_true = .false.
    real, dimension(:, :, :, :), allocatable :: dkperp2dr
    
    ! For the reponse matrix

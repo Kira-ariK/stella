@@ -74,7 +74,8 @@ module gk_flow_shear
    logical :: hammett_flow_shear 
    ! remap_em: what the Hammett remap moves in electromagnetic runs (see remap_flow_shear in
    ! gyrokinetic_equation_implicit.f90).  0 = g (original, default); 1 = the canonical gbar;
-   ! 2 = g, with A_par carried with its mode and gbar rebuilt at the new cell (A_par continuous).
+   ! 2 = g, with A_par carried with its mode and gbar rebuilt at the new cell (A_par continuous);
+   ! 3 = g (as 0), with A_par solved at each mode's drifted k_x (kperp2_true), so A_par does not jump at a shift.
    integer :: remap_em
    real :: g_exb, g_exbfac, omprimfac
    
@@ -267,6 +268,9 @@ contains
          shift_start = ikx_max + 1
       end if
 
+      ! remap_em = 3: A_par uses |k_perp|^2 at the drifted k_x (see update_kperp2_true)
+      if (remap_em == 3 .and. hammett_flow_shear .and. prp_shear_enabled) call update_kperp2_true
+
       if (box) upwind_advect = exp(-zi * g_exbfac * g_exb * code_dt * spread(aky, 2, nakx) * spread(x_d, 1, naky))
 
    end subroutine init_flow_shear
@@ -410,6 +414,41 @@ contains
       end do
    end subroutine shift_field_hammett
 
+   !****************************************************************************
+   !            |k_perp|^2 at the drifted k_x (remap_em = 3)
+   !****************************************************************************
+   ! Between Hammett shifts a mode's true k_x drifts by dk_x = shift_sign |g_exb k_y| shift_state from its grid value;
+   ! a shift moves its content by shift_sign * Delta k_x (shift_sign < 0: to k_x - Delta k_x) when shift_state passes
+   ! shift_times/2 and resets shift_state by -shift_times, so k_x,grid + dk_x is continuous through the shift.  Using
+   ! this k_perp^2 for A_par keeps A_par continuous at the remap (no kick), with g moved as in the original scheme.
+   subroutine update_kperp2_true
+      use arrays, only: kperp2, kperp2_true, use_kperp2_true, shift_state
+      use geometry, only: grady_dot_grady, gradx_dot_grady, gradx_dot_gradx, q_as_x
+      use grids_z, only: nzgrid
+      use grids_kxky, only: naky, nakx, nalpha, akx, aky, zonal_mode
+      implicit none
+      integer :: iky, ikx
+      real :: kxt
+      if (.not. allocated(kperp2_true)) allocate (kperp2_true(naky, nakx, nalpha, -nzgrid:nzgrid))
+      if (q_as_x) then
+         kperp2_true = kperp2                      ! not implemented for q_as_x: no drift correction
+         use_kperp2_true = .true.
+         return
+      end if
+      do iky = 1, naky
+         if (zonal_mode(iky)) then
+            kperp2_true(iky, :, :, :) = kperp2(iky, :, :, :)
+            cycle
+         end if
+         do ikx = 1, nakx
+            kxt = akx(ikx) + shift_sign * abs(g_exb * g_exbfac * aky(iky)) * shift_state(iky)
+            kperp2_true(iky, ikx, :, :) = kxt * kxt * gradx_dot_gradx &
+               + 2.0 * kxt * aky(iky) * gradx_dot_grady + aky(iky) * aky(iky) * grady_dot_grady
+         end do
+      end do
+      use_kperp2_true = .true.
+   end subroutine update_kperp2_true
+
    subroutine advance_perp_flow_shear(g)
 
       ! Parallelisation
@@ -520,6 +559,7 @@ contains
 
       shift_state = shift_state + code_dt
       if (zonal_mode(1)) shift_state(1) = 0.
+      if (remap_em == 3 .and. hammett_flow_shear) call update_kperp2_true
 
       if (runtype_option_switch == runtype_multibox) then
          do ivmu = vmu_lo%llim_proc, vmu_lo%ulim_proc
