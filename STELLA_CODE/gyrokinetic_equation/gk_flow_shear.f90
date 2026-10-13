@@ -59,6 +59,7 @@ module gk_flow_shear
    public :: remap_em
    public :: shift_field_hammett
    public :: perp_shift_pending
+   public :: perp_shift_mask
    public :: g_exb, g_exbfac, omprimfac 
 
    private
@@ -357,6 +358,23 @@ contains
          if (shift_state(iky) > 0.5 * shift_times(iky)) perp_shift_pending = .true.
       end do
    end function perp_shift_pending
+
+   !****************************************************************************
+   ! Which k_y will advance_perp_flow_shear shift on its next call (same test as its Hammett branch).
+   !****************************************************************************
+   subroutine perp_shift_mask(mask)
+      use grids_kxky, only: naky, zonal_mode
+      use arrays, only: shift_state
+      implicit none
+      logical, dimension(:), intent(out) :: mask
+      integer :: iky
+      mask = .false.
+      if (.not. (prp_shear_enabled .and. hammett_flow_shear)) return
+      do iky = 1, naky
+         if (zonal_mode(iky)) cycle
+         mask(iky) = shift_state(iky) > 0.5 * shift_times(iky)
+      end do
+   end subroutine perp_shift_mask
 
    !****************************************************************************
    !              Move a field one k_x cell, exactly as the remap moves g

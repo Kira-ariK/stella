@@ -185,6 +185,9 @@ contains
    !     A_par from gbar, rebuild g: g -> shift(g) + c J0(k_new) [A_par,carried - A_par,new].  A_par nearly
    !     continuous, one J0 only.
    ! advance_fields returns at once if fields_updated is set, so the flag is cleared before each solve.
+   ! Only the k_y shifted on this call go through g -> gbar -> g; every other k_y (including the zonal ones and
+   ! k_x = k_y = 0, where A_par from g is 0 but A_par from gbar is j/skin) is restored unchanged afterwards, so the
+   ! options act on the shifted modes only.  The field solve is local in (k_y, k_x), so this is exact.
    !****************************************************************************
    subroutine remap_flow_shear(g, phi, apar, bpar)
 
@@ -194,17 +197,27 @@ contains
       use field_equations, only: advance_fields, fields_updated
       use calculations_tofrom_ghf, only: gbar_to_g
       use gk_flow_shear, only: advance_perp_flow_shear, perp_shift_pending, remap_em, shift_field_hammett
+      use gk_flow_shear, only: perp_shift_mask
+      use grids_kxky, only: naky
 
       implicit none
 
       complex, dimension(:, :, -nzgrid:, :, vmu_lo%llim_proc:), intent(in out) :: g
       complex, dimension(:, :, -nzgrid:, :), intent(in out) :: phi, apar, bpar
       complex, dimension(:, :, :, :), allocatable :: apar_s
+      complex, dimension(:, :, :, :, :), allocatable :: gkeep
+      logical, dimension(:), allocatable :: shifted
+      integer :: iky
 
       if (remap_em == 0 .or. .not. include_apar .or. .not. perp_shift_pending()) then
          call advance_perp_flow_shear(g)
          return
       end if
+
+      ! Remember which k_y move this call, and keep the others untouched
+      allocate (shifted(naky))
+      call perp_shift_mask(shifted)
+      allocate (gkeep, source=g)
 
       fields_updated = .false.
       call advance_fields(g, phi, apar, bpar, dist='g')
@@ -221,12 +234,20 @@ contains
          deallocate (apar_s)
       case default
          call advance_perp_flow_shear(g)
+         deallocate (gkeep, shifted)
          return
       end select
 
       fields_updated = .false.
       call advance_fields(g, phi, apar, bpar, dist='gbar')
       call gbar_to_g(g, apar, 1.0)
+
+      ! Restore every k_y that was not shifted (the remap leaves them unchanged; the round trip would not)
+      do iky = 1, naky
+         if (.not. shifted(iky)) g(iky, :, :, :, :) = gkeep(iky, :, :, :, :)
+      end do
+      deallocate (gkeep, shifted)
+      fields_updated = .false.
 
    end subroutine remap_flow_shear
 
