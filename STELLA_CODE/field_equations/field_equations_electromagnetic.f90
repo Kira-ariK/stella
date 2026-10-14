@@ -254,7 +254,6 @@ contains
       ! Arrays
       use arrays, only: kperp2 
       use arrays, only: apar_denom
-      use arrays, only: kperp2_true, use_kperp2_true
       
       ! Parameters
       use parameters_physics, only: beta
@@ -370,17 +369,9 @@ contains
          
          ! Depending on the distribution function used the denominator is modified. 
          if (dist == 'h') then
-            if (use_kperp2_true) then
-               apar = apar / spread(kperp2_true(:, :, ia, :), 4, ntubes)
-            else
-               apar = apar / spread(kperp2(:, :, ia, :), 4, ntubes)
-            end if
+            apar = apar / spread(kperp2(:, :, ia, :), 4, ntubes)
          else if (dist == 'gbar') then
-            if (use_kperp2_true) then
-               apar = apar / spread(apar_denom - kperp2(:, :, ia, :) + kperp2_true(:, :, ia, :), 4, ntubes)
-            else
-               apar = apar / spread(apar_denom, 4, ntubes)
-            end if
+            apar = apar / spread(apar_denom, 4, ntubes)
          else if (dist == 'gstar') then
             write (*, *) 'APAR NOT SETUP FOR GSTAR YET. aborting.'
             call mp_abort('APAR NOT SETUP FOR GSTAR YET. aborting.')
@@ -498,7 +489,6 @@ contains
       ! Arrays
       use arrays, only: kperp2
       use arrays, only: apar_denom
-      use arrays, only: kperp2_true, use_kperp2_true
       
       ! Grids
       use grids_z, only: nzgrid, ntubes
@@ -516,27 +506,14 @@ contains
       ! Assume we only have one field line
       ia = 1
       
-      ! remap_em = 3: k_perp^2 at the drifted k_x (kperp2_true), so A_par does not jump at a Hammett remap
       if (dist == 'g') then
-         if (use_kperp2_true) then
-            where (spread(kperp2_true(:, :, ia, :), 4, ntubes) > epsilon(0.0))
-               apar = apar / spread(kperp2_true(:, :, ia, :), 4, ntubes)
-            elsewhere
-               apar = 0.0
-            end where
-         else
-            where (spread(kperp2(:, :, ia, :), 4, ntubes) > epsilon(0.0))
-               apar = apar / spread(kperp2(:, :, ia, :), 4, ntubes)
-            elsewhere
-               apar = 0.0
-            end where
-         end if
+         where (spread(kperp2(:, :, ia, :), 4, ntubes) > epsilon(0.0))
+            apar = apar / spread(kperp2(:, :, ia, :), 4, ntubes)
+         elsewhere
+            apar = 0.0
+         end where
       else if (dist == 'gbar') then
-         if (use_kperp2_true) then
-            apar = apar / spread(apar_denom - kperp2(:, :, ia, :) + kperp2_true(:, :, ia, :), 4, ntubes)
-         else
-            apar = apar / spread(apar_denom, 4, ntubes)
-         end if
+         apar = apar / spread(apar_denom, 4, ntubes)
       else
          if (proc0) write (*, *) 'unknown dist option in get_apar. aborting'
          call mp_abort('unkown dist option in get_apar. aborting')
@@ -665,7 +642,6 @@ contains
       use arrays, only: denominator_fields
       use arrays, only: denominator_fields_inv11, denominator_fields_inv13, denominator_fields_inv31, denominator_fields_inv33
       use arrays, only: apar_denom
-      use arrays, only: kperp2_true, use_kperp2_true
       
       ! Parameters
       use parameters_physics, only: include_apar, include_bpar
@@ -828,7 +804,6 @@ contains
       use arrays_fields, only: bpar, bpar_old
       use arrays, only: denominator_fields_inv11, denominator_fields_inv13, denominator_fields_inv31, denominator_fields_inv33
       use arrays, only: apar_denom
-      use arrays, only: kperp2_true, use_kperp2_true
 
       implicit none
 
@@ -876,7 +851,6 @@ contains
       use arrays_fields, only: bpar
       use arrays, only: denominator_fields_inv11, denominator_fields_inv13, denominator_fields_inv31, denominator_fields_inv33
       use arrays, only: apar_denom
-      use arrays, only: kperp2_true, use_kperp2_true
       
       implicit none
 
