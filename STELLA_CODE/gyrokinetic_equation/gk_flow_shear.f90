@@ -56,7 +56,7 @@ module gk_flow_shear
    ! Input parameters
    public :: prp_shear_enabled               ! Enables perpendicular flow shear
    public :: hammett_flow_shear
-   public :: remap_em
+   public :: remap_em, remap_em_kymin, remap_em_kymax
    public :: shift_field_hammett
    public :: perp_shift_pending
    public :: perp_shift_mask
@@ -75,7 +75,10 @@ module gk_flow_shear
    ! remap_em: what the Hammett remap moves in electromagnetic runs (see remap_flow_shear in
    ! gyrokinetic_equation_implicit.f90).  0 = g (original, default); 1 = the canonical gbar;
    ! 2 = g, with A_par carried with its mode and gbar rebuilt at the new cell (A_par continuous).
+   ! remap_em_kymin, remap_em_kymax: remap_em acts only on k_y in this range (diagnostic; default all k_y);
+   ! other k_y are remapped as in remap_em = 0.
    integer :: remap_em
+   real :: remap_em_kymin, remap_em_kymax
    real :: g_exb, g_exbfac, omprimfac
    
    ! Parallel flow shear
@@ -103,7 +106,8 @@ contains
       !-------------------------------------------------------------------------
       
       ! Read the "flow_shear" namelist in the input file
-      call read_namelist_flow_shear(prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac, remap_em)
+      call read_namelist_flow_shear(prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac, remap_em, &
+         remap_em_kymin, remap_em_kymax)
       
       ! Broadcast the input parameters
       call broadcast(prp_shear_enabled)
@@ -112,6 +116,8 @@ contains
       call broadcast(g_exbfac)
       call broadcast(omprimfac)
       call broadcast(remap_em)
+      call broadcast(remap_em_kymin)
+      call broadcast(remap_em_kymax)
 
    end subroutine read_parameters_flow_shear
 

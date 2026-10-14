@@ -11,6 +11,8 @@
 !     g_exbfac = 1.0
 !     omprimfac = 1.0
 !     remap_em = 0
+!     remap_em_kymin = 0.0
+!     remap_em_kymax = 1.0e10
 ! 
 ! For each namelists two (or three) routines exist:
 !    - set_default_parameters_<namelist>
@@ -42,7 +44,7 @@ contains
    !                               FLOW SHEAR TERMS                            !
    !****************************************************************************
    subroutine read_namelist_flow_shear(prp_shear_enabled, hammett_flow_shear, &
-      g_exb, g_exbfac, omprimfac, remap_em)
+      g_exb, g_exbfac, omprimfac, remap_em, remap_em_kymin, remap_em_kymax)
 
       use mp, only: proc0
 
@@ -52,6 +54,7 @@ contains
       logical, intent(out) :: prp_shear_enabled, hammett_flow_shear 
       integer, intent(out) :: remap_em
       real :: g_exb, g_exbfac, omprimfac
+      real, intent(out) :: remap_em_kymin, remap_em_kymax
       
       !-------------------------------------------------------------------------
 
@@ -73,6 +76,8 @@ contains
          g_exbfac = 1.0
          omprimfac = 1.0
          remap_em = 0
+         remap_em_kymin = 0.0
+         remap_em_kymax = 1.0e10
 
       end subroutine set_default_parameters_flow_shear
 
@@ -82,7 +87,8 @@ contains
          use file_utils, only: input_unit_exist
          implicit none
 
-         namelist /flow_shear/ prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac, remap_em
+         namelist /flow_shear/ prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac, remap_em, &
+            remap_em_kymin, remap_em_kymax
          in_file = input_unit_exist('flow_shear', dexist)
          if (dexist) read (unit=in_file, nml=flow_shear)
 
@@ -104,6 +110,8 @@ contains
          write (unit, '(A, ES0.4)') '  g_exbfac = ', g_exbfac
          write (unit, '(A, ES0.4)') '  omprimfac = ', omprimfac
          write (unit, '(A, I0)') '  remap_em = ', remap_em
+         write (unit, '(A, ES0.4)') '  remap_em_kymin = ', remap_em_kymin
+         write (unit, '(A, ES0.4)') '  remap_em_kymax = ', remap_em_kymax
          write (unit, '(A)') '/'
          write (unit, '(A)') ''
 

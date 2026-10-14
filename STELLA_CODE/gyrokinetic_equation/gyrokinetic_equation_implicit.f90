@@ -188,6 +188,8 @@ contains
    ! Only the k_y shifted on this call go through g -> gbar -> g; every other k_y (including the zonal ones and
    ! k_x = k_y = 0, where A_par from g is 0 but A_par from gbar is j/skin) is restored unchanged afterwards, so the
    ! options act on the shifted modes only.  The field solve is local in (k_y, k_x), so this is exact.
+   ! Shifted k_y outside [remap_em_kymin, remap_em_kymax] get the plain shift of g (remap_em = 0): the kept copy is
+   ! shifted with shift_field_hammett (same shift, shift_state untouched) before the remap and restored afterwards.
    !****************************************************************************
    subroutine remap_flow_shear(g, phi, apar, bpar)
 
@@ -197,8 +199,8 @@ contains
       use field_equations, only: advance_fields, fields_updated
       use calculations_tofrom_ghf, only: gbar_to_g
       use gk_flow_shear, only: advance_perp_flow_shear, perp_shift_pending, remap_em, shift_field_hammett
-      use gk_flow_shear, only: perp_shift_mask
-      use grids_kxky, only: naky
+      use gk_flow_shear, only: perp_shift_mask, remap_em_kymin, remap_em_kymax
+      use grids_kxky, only: naky, aky
 
       implicit none
 
@@ -207,7 +209,7 @@ contains
       complex, dimension(:, :, :, :), allocatable :: apar_s
       complex, dimension(:, :, :, :, :), allocatable :: gkeep
       logical, dimension(:), allocatable :: shifted
-      integer :: iky
+      integer :: iky, ivmu
 
       if (remap_em == 0 .or. .not. include_apar .or. .not. perp_shift_pending()) then
          call advance_perp_flow_shear(g)
@@ -218,6 +220,13 @@ contains
       allocate (shifted(naky))
       call perp_shift_mask(shifted)
       allocate (gkeep, source=g)
+      ! Shifted k_y outside the remap_em range: the kept copy gets the plain shift of g (before shift_state resets)
+      if (any(shifted .and. (aky < remap_em_kymin .or. aky > remap_em_kymax))) then
+         do ivmu = vmu_lo%llim_proc, vmu_lo%ulim_proc
+            call shift_field_hammett(gkeep(:, :, :, :, ivmu))
+         end do
+         where (aky < remap_em_kymin .or. aky > remap_em_kymax) shifted = .false.
+      end if
 
       fields_updated = .false.
       call advance_fields(g, phi, apar, bpar, dist='g')
@@ -242,7 +251,8 @@ contains
       call advance_fields(g, phi, apar, bpar, dist='gbar')
       call gbar_to_g(g, apar, 1.0)
 
-      ! Restore every k_y that was not shifted (the remap leaves them unchanged; the round trip would not)
+      ! Restore every k_y that was not shifted (the remap leaves them unchanged; the round trip would not), and the
+      ! shifted k_y outside the remap_em range (plain shift of g, done on the kept copy above)
       do iky = 1, naky
          if (.not. shifted(iky)) g(iky, :, :, :, :) = gkeep(iky, :, :, :, :)
       end do
