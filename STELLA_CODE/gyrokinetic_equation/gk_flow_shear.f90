@@ -56,7 +56,7 @@ module gk_flow_shear
    ! Input parameters
    public :: prp_shear_enabled               ! Enables perpendicular flow shear
    public :: hammett_flow_shear
-   public :: remap_em, remap_em_kymin, remap_em_kymax
+   public :: remap_em, remap_em_kymin, remap_em_kymax, remap_em_ndump
    public :: shift_field_hammett
    public :: perp_shift_pending
    public :: perp_shift_mask
@@ -79,6 +79,9 @@ module gk_flow_shear
    ! other k_y are remapped as in remap_em = 0.
    integer :: remap_em
    real :: remap_em_kymin, remap_em_kymax
+   ! remap_em_ndump: at the first remap_em_ndump remaps, write A_par from the original and the gbar remap of the same
+   ! state to remap_dump.txt (diagnostic, remap_em = 1 only; default 0 = off).
+   integer :: remap_em_ndump
    real :: g_exb, g_exbfac, omprimfac
    
    ! Parallel flow shear
@@ -107,7 +110,7 @@ contains
       
       ! Read the "flow_shear" namelist in the input file
       call read_namelist_flow_shear(prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac, remap_em, &
-         remap_em_kymin, remap_em_kymax)
+         remap_em_kymin, remap_em_kymax, remap_em_ndump)
       
       ! Broadcast the input parameters
       call broadcast(prp_shear_enabled)
@@ -118,6 +121,7 @@ contains
       call broadcast(remap_em)
       call broadcast(remap_em_kymin)
       call broadcast(remap_em_kymax)
+      call broadcast(remap_em_ndump)
 
    end subroutine read_parameters_flow_shear
 

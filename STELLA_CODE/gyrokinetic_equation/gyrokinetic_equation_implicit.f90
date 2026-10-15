@@ -20,6 +20,9 @@ module gyrokinetic_equation_implicit
    ! Make routines available to stella.f90
    public :: advance_distribution_function_using_implicit_gyrokinetic_terms
 
+   ! Number of remaps written by dump_remap_comparison (remap_em_ndump)
+   integer :: ndump_done = 0
+
    private
 
 contains
@@ -199,7 +202,7 @@ contains
       use field_equations, only: advance_fields, fields_updated
       use calculations_tofrom_ghf, only: gbar_to_g
       use gk_flow_shear, only: advance_perp_flow_shear, perp_shift_pending, remap_em, shift_field_hammett
-      use gk_flow_shear, only: perp_shift_mask, remap_em_kymin, remap_em_kymax
+      use gk_flow_shear, only: perp_shift_mask, remap_em_kymin, remap_em_kymax, remap_em_ndump
       use grids_kxky, only: naky, aky
 
       implicit none
@@ -215,6 +218,9 @@ contains
          call advance_perp_flow_shear(g)
          return
       end if
+
+      ! Diagnostic: compare A_par from the original and the gbar remap of this same state (leaves g unchanged)
+      if (ndump_done < remap_em_ndump) call dump_remap_comparison(g, phi, apar, bpar)
 
       ! Remember which k_y move this call, and keep the others untouched
       allocate (shifted(naky))
@@ -260,5 +266,106 @@ contains
       fields_updated = .false.
 
    end subroutine remap_flow_shear
+
+   !****************************************************************************
+   !        Diagnostic: A_par after the original and after the gbar remap
+   !****************************************************************************
+   ! From the same incoming g, on copies (g and shift_state are left unchanged):
+   !   A_pre   A_par solved from g before the remap, moved one cell with the shift (the value each cell inherits);
+   !   A_g     original remap: shift g, solve A_par from g            (A_par = j / k_perp^2);
+   !   A_gbar  remap_em = 1:   build gbar, shift it, solve from gbar  (A_par = j(gbar) / apar_denom);
+   !   A_cons  no shift: build gbar from g and solve from gbar; must equal A_par from g (checks that the g <-> gbar
+   !           conversion and apar_denom use consistent velocity integrals).
+   ! proc0 appends one line per shifted (k_y, k_x) to remap_dump.txt: field-line sums of |A|^2 and the values at z = 0.
+   subroutine dump_remap_comparison(g, phi, apar, bpar)
+
+      use mp, only: proc0
+      use parallelisation_layouts, only: vmu_lo
+      use grids_z, only: nzgrid, ntubes
+      use grids_kxky, only: naky, nakx, aky, akx, zonal_mode
+      use grids_time, only: code_time
+      use arrays, only: kperp2
+      use field_equations, only: advance_fields, fields_updated
+      use calculations_tofrom_ghf, only: gbar_to_g
+      use gk_flow_shear, only: shift_field_hammett, perp_shift_mask
+
+      implicit none
+
+      complex, dimension(:, :, -nzgrid:, :, vmu_lo%llim_proc:), intent(in) :: g
+      complex, dimension(:, :, -nzgrid:, :), intent(in out) :: phi, apar, bpar
+      complex, dimension(:, :, :, :, :), allocatable :: gw
+      complex, dimension(:, :, :, :), allocatable :: a_pre, a_g, a_gbar, a_cons, kp_src
+      logical, dimension(:), allocatable :: shifted
+      integer :: iky, ikx, ivmu, unit
+      real :: cons
+      logical, save :: first = .true.
+
+      allocate (shifted(naky))
+      call perp_shift_mask(shifted)
+      allocate (gw, source=g)
+      allocate (a_pre, a_g, a_gbar, a_cons, kp_src, mold=apar)
+
+      ! A_par from g before the remap
+      fields_updated = .false.
+      call advance_fields(gw, phi, apar, bpar, dist='g')
+      a_pre = apar
+
+      ! Consistency: gbar from g, A_par from gbar, no shift
+      call gbar_to_g(gw, a_pre, -1.0)
+      fields_updated = .false.
+      call advance_fields(gw, phi, apar, bpar, dist='gbar')
+      a_cons = apar
+      cons = sqrt(sum(abs(a_cons - a_pre)**2) / max(sum(abs(a_pre)**2), tiny(1.0)))
+
+      ! remap_em = 1: shift that gbar, A_par from gbar
+      do ivmu = vmu_lo%llim_proc, vmu_lo%ulim_proc
+         call shift_field_hammett(gw(:, :, :, :, ivmu))
+      end do
+      fields_updated = .false.
+      call advance_fields(gw, phi, apar, bpar, dist='gbar')
+      a_gbar = apar
+
+      ! Original: shift g, A_par from g
+      gw = g
+      do ivmu = vmu_lo%llim_proc, vmu_lo%ulim_proc
+         call shift_field_hammett(gw(:, :, :, :, ivmu))
+      end do
+      fields_updated = .false.
+      call advance_fields(gw, phi, apar, bpar, dist='g')
+      a_g = apar
+      fields_updated = .false.
+
+      ! k_perp^2 of the cell each mode comes from, and A_pre moved with its mode
+      kp_src = spread(cmplx(kperp2(:, :, 1, :)), 4, ntubes)
+      call shift_field_hammett(kp_src)
+      call shift_field_hammett(a_pre)
+
+      if (proc0) then
+         open (newunit=unit, file='remap_dump.txt', position='append', action='write')
+         if (first) then
+            write (unit, '(A)') '# remap_em_ndump: A_par from the same state after the original remap (shift g) and the'
+            write (unit, '(A)') '# gbar remap; one line per shifted (ky,kx); sums are over z (tube 1); z0 = values at z = 0.'
+            write (unit, '(A)') '# event t ky kx_new kp2_src_z0 kp2_new_z0 sumA2_pre sumA2_g sumA2_gbar' // &
+               ' ReA_pre_z0 ImA_pre_z0 ReA_g_z0 ImA_g_z0 ReA_gbar_z0 ImA_gbar_z0 cons_rel'
+            first = .false.
+         end if
+         do iky = 1, naky
+            if (.not. shifted(iky) .or. zonal_mode(iky)) cycle
+            do ikx = 1, nakx
+               write (unit, '(I4, 1X, ES14.7, 2(1X, F9.5), 2(1X, ES12.5), 3(1X, ES12.5), 6(1X, ES13.5), 1X, ES10.3)') &
+                  ndump_done + 1, code_time, aky(iky), akx(ikx), real(kp_src(iky, ikx, 0, 1)), kperp2(iky, ikx, 1, 0), &
+                  sum(abs(a_pre(iky, ikx, :, 1))**2), sum(abs(a_g(iky, ikx, :, 1))**2), &
+                  sum(abs(a_gbar(iky, ikx, :, 1))**2), &
+                  real(a_pre(iky, ikx, 0, 1)), aimag(a_pre(iky, ikx, 0, 1)), real(a_g(iky, ikx, 0, 1)), &
+                  aimag(a_g(iky, ikx, 0, 1)), real(a_gbar(iky, ikx, 0, 1)), aimag(a_gbar(iky, ikx, 0, 1)), cons
+            end do
+         end do
+         close (unit)
+      end if
+      ndump_done = ndump_done + 1
+
+      deallocate (gw, a_pre, a_g, a_gbar, a_cons, kp_src, shifted)
+
+   end subroutine dump_remap_comparison
 
 end module gyrokinetic_equation_implicit

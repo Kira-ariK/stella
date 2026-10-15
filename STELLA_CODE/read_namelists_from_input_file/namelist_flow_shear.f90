@@ -13,6 +13,7 @@
 !     remap_em = 0
 !     remap_em_kymin = 0.0
 !     remap_em_kymax = 1.0e10
+!     remap_em_ndump = 0
 ! 
 ! For each namelists two (or three) routines exist:
 !    - set_default_parameters_<namelist>
@@ -44,7 +45,7 @@ contains
    !                               FLOW SHEAR TERMS                            !
    !****************************************************************************
    subroutine read_namelist_flow_shear(prp_shear_enabled, hammett_flow_shear, &
-      g_exb, g_exbfac, omprimfac, remap_em, remap_em_kymin, remap_em_kymax)
+      g_exb, g_exbfac, omprimfac, remap_em, remap_em_kymin, remap_em_kymax, remap_em_ndump)
 
       use mp, only: proc0
 
@@ -55,6 +56,7 @@ contains
       integer, intent(out) :: remap_em
       real :: g_exb, g_exbfac, omprimfac
       real, intent(out) :: remap_em_kymin, remap_em_kymax
+      integer, intent(out) :: remap_em_ndump
       
       !-------------------------------------------------------------------------
 
@@ -78,6 +80,7 @@ contains
          remap_em = 0
          remap_em_kymin = 0.0
          remap_em_kymax = 1.0e10
+         remap_em_ndump = 0
 
       end subroutine set_default_parameters_flow_shear
 
@@ -88,7 +91,7 @@ contains
          implicit none
 
          namelist /flow_shear/ prp_shear_enabled, hammett_flow_shear, g_exb, g_exbfac, omprimfac, remap_em, &
-            remap_em_kymin, remap_em_kymax
+            remap_em_kymin, remap_em_kymax, remap_em_ndump
          in_file = input_unit_exist('flow_shear', dexist)
          if (dexist) read (unit=in_file, nml=flow_shear)
 
@@ -112,6 +115,7 @@ contains
          write (unit, '(A, I0)') '  remap_em = ', remap_em
          write (unit, '(A, ES0.4)') '  remap_em_kymin = ', remap_em_kymin
          write (unit, '(A, ES0.4)') '  remap_em_kymax = ', remap_em_kymax
+         write (unit, '(A, I0)') '  remap_em_ndump = ', remap_em_ndump
          write (unit, '(A)') '/'
          write (unit, '(A)') ''
 
