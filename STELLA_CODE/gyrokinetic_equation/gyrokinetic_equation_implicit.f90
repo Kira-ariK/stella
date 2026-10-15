@@ -276,12 +276,13 @@ contains
    !   A_gbar  remap_em = 1:   build gbar, shift it, solve from gbar  (A_par = j(gbar) / apar_denom);
    !   A_cons  no shift: build gbar from g and solve from gbar; must equal A_par from g (checks that the g <-> gbar
    !           conversion and apar_denom use consistent velocity integrals).
-   ! proc0 appends one line per shifted (k_y, k_x) to remap_dump.txt: field-line sums of |A|^2 and the values at z = 0.
+   ! proc0 appends one line per shifted (k_y, k_x) to remap_dump.txt: field-line sums of |A|^2 and the values at z = 0;
+   ! for the smallest non-zero k_y it also writes the whole field A_par(k_x, z) to remap_dump_field.txt.
    subroutine dump_remap_comparison(g, phi, apar, bpar)
 
       use mp, only: proc0
       use parallelisation_layouts, only: vmu_lo
-      use grids_z, only: nzgrid, ntubes
+      use grids_z, only: nzgrid, ntubes, zed
       use grids_kxky, only: naky, nakx, aky, akx, zonal_mode
       use grids_time, only: code_time
       use arrays, only: kperp2
@@ -294,16 +295,16 @@ contains
       complex, dimension(:, :, -nzgrid:, :, vmu_lo%llim_proc:), intent(in) :: g
       complex, dimension(:, :, -nzgrid:, :), intent(in out) :: phi, apar, bpar
       complex, dimension(:, :, :, :, :), allocatable :: gw
-      complex, dimension(:, :, :, :), allocatable :: a_pre, a_g, a_gbar, a_cons, kp_src
+      complex, dimension(:, :, :, :), allocatable :: a_pre, a_pre0, a_g, a_gbar, a_cons, kp_src
       logical, dimension(:), allocatable :: shifted
-      integer :: iky, ikx, ivmu, unit
+      integer :: iky, ikx, ivmu, unit, iz, iky_min
       real :: cons
-      logical, save :: first = .true.
+      logical, save :: first = .true., first_field = .true.
 
       allocate (shifted(naky))
       call perp_shift_mask(shifted)
       allocate (gw, source=g)
-      allocate (a_pre, a_g, a_gbar, a_cons, kp_src, mold=apar)
+      allocate (a_pre, a_pre0, a_g, a_gbar, a_cons, kp_src, mold=apar)
 
       ! A_par from g before the remap
       fields_updated = .false.
@@ -315,6 +316,7 @@ contains
       fields_updated = .false.
       call advance_fields(gw, phi, apar, bpar, dist='gbar')
       a_cons = apar
+      a_pre0 = a_pre
       cons = sqrt(sum(abs(a_cons - a_pre)**2) / max(sum(abs(a_pre)**2), tiny(1.0)))
 
       ! remap_em = 1: shift that gbar, A_par from gbar
@@ -361,10 +363,37 @@ contains
             end do
          end do
          close (unit)
+
+         ! The whole field for the smallest non-zero k_y (its remap is the one that matters most)
+         iky_min = minloc(aky, dim=1, mask=aky > 0.)
+         if (shifted(iky_min)) then
+            open (newunit=unit, file='remap_dump_field.txt', position='append', action='write')
+            if (first_field) then
+               write (unit, '(A)') '# A_par(k_x, z) of the smallest non-zero k_y at its remaps (tube 1).  pre0, cons: before'
+               write (unit, '(A)') '# the remap at the cell itself (from g; from gbar, no shift; must agree).  pre: the value'
+               write (unit, '(A)') '# the cell inherits (pre0 moved with the shift).  g: original remap.  gbar: gbar remap.'
+               write (unit, '(A)') '# event t ky ikx kx iz zed Re_pre0 Im_pre0 Re_cons Im_cons Re_pre Im_pre Re_g Im_g' // &
+                  ' Re_gbar Im_gbar kp2_src kp2_new'
+               first_field = .false.
+            end if
+            do ikx = 1, nakx
+               do iz = -nzgrid, nzgrid
+                  write (unit, '(I4, 1X, ES14.7, 1X, F9.5, 1X, I4, 1X, F9.5, 1X, I4, 1X, F10.5, 10(1X, ES13.5), 2(1X, ES12.5))') &
+                     ndump_done + 1, code_time, aky(iky_min), ikx, akx(ikx), iz, zed(iz), &
+                     real(a_pre0(iky_min, ikx, iz, 1)), aimag(a_pre0(iky_min, ikx, iz, 1)), &
+                     real(a_cons(iky_min, ikx, iz, 1)), aimag(a_cons(iky_min, ikx, iz, 1)), &
+                     real(a_pre(iky_min, ikx, iz, 1)), aimag(a_pre(iky_min, ikx, iz, 1)), &
+                     real(a_g(iky_min, ikx, iz, 1)), aimag(a_g(iky_min, ikx, iz, 1)), &
+                     real(a_gbar(iky_min, ikx, iz, 1)), aimag(a_gbar(iky_min, ikx, iz, 1)), &
+                     real(kp_src(iky_min, ikx, iz, 1)), kperp2(iky_min, ikx, 1, iz)
+               end do
+            end do
+            close (unit)
+         end if
       end if
       ndump_done = ndump_done + 1
 
-      deallocate (gw, a_pre, a_g, a_gbar, a_cons, kp_src, shifted)
+      deallocate (gw, a_pre, a_pre0, a_g, a_gbar, a_cons, kp_src, shifted)
 
    end subroutine dump_remap_comparison
 
