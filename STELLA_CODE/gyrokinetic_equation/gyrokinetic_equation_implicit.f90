@@ -296,20 +296,23 @@ contains
       complex, dimension(:, :, -nzgrid:, :), intent(in out) :: phi, apar, bpar
       complex, dimension(:, :, :, :, :), allocatable :: gw
       complex, dimension(:, :, :, :), allocatable :: a_pre, a_pre0, a_g, a_gbar, a_cons, kp_src
+      complex, dimension(:, :, :, :), allocatable :: p_pre, p_g, p_gbar
       logical, dimension(:), allocatable :: shifted
       integer :: iky, ikx, ivmu, unit, iz, iky_min
       real :: cons
-      logical, save :: first = .true., first_field = .true.
+      logical, save :: first = .true., first_field = .true., first_phi = .true.
 
       allocate (shifted(naky))
       call perp_shift_mask(shifted)
       allocate (gw, source=g)
       allocate (a_pre, a_pre0, a_g, a_gbar, a_cons, kp_src, mold=apar)
+      allocate (p_pre, p_g, p_gbar, mold=phi)
 
       ! A_par from g before the remap
       fields_updated = .false.
       call advance_fields(gw, phi, apar, bpar, dist='g')
       a_pre = apar
+      p_pre = phi
 
       ! Consistency: gbar from g, A_par from gbar, no shift
       call gbar_to_g(gw, a_pre, -1.0)
@@ -326,6 +329,7 @@ contains
       fields_updated = .false.
       call advance_fields(gw, phi, apar, bpar, dist='gbar')
       a_gbar = apar
+      p_gbar = phi
 
       ! Original: shift g, A_par from g
       gw = g
@@ -335,12 +339,14 @@ contains
       fields_updated = .false.
       call advance_fields(gw, phi, apar, bpar, dist='g')
       a_g = apar
+      p_g = phi
       fields_updated = .false.
 
       ! k_perp^2 of the cell each mode comes from, and A_pre moved with its mode
       kp_src = spread(cmplx(kperp2(:, :, 1, :)), 4, ntubes)
       call shift_field_hammett(kp_src)
       call shift_field_hammett(a_pre)
+      call shift_field_hammett(p_pre)
 
       if (proc0) then
          open (newunit=unit, file='remap_dump.txt', position='append', action='write')
@@ -389,11 +395,30 @@ contains
                end do
             end do
             close (unit)
+
+            ! phi(k_x, z) of the same k_y: before (moved with its mode), after moving g, after moving gbar
+            open (newunit=unit, file='remap_dump_phi_field.txt', position='append', action='write')
+            if (first_phi) then
+               write (unit, '(A)') '# phi(k_x, z) of the smallest non-zero k_y at its remaps (tube 1).  pre: phi before the'
+               write (unit, '(A)') '# remap, moved with its mode.  g: after moving g.  gbar: after moving gbar.'
+               write (unit, '(A)') '# event t ky ikx kx iz zed Re_pre Im_pre Re_g Im_g Re_gbar Im_gbar'
+               first_phi = .false.
+            end if
+            do ikx = 1, nakx
+               do iz = -nzgrid, nzgrid
+                  write (unit, '(I4, 1X, ES14.7, 1X, F9.5, 1X, I4, 1X, F9.5, 1X, I4, 1X, F10.5, 6(1X, ES13.5))') &
+                     ndump_done + 1, code_time, aky(iky_min), ikx, akx(ikx), iz, zed(iz), &
+                     real(p_pre(iky_min, ikx, iz, 1)), aimag(p_pre(iky_min, ikx, iz, 1)), &
+                     real(p_g(iky_min, ikx, iz, 1)), aimag(p_g(iky_min, ikx, iz, 1)), &
+                     real(p_gbar(iky_min, ikx, iz, 1)), aimag(p_gbar(iky_min, ikx, iz, 1))
+               end do
+            end do
+            close (unit)
          end if
       end if
       ndump_done = ndump_done + 1
 
-      deallocate (gw, a_pre, a_pre0, a_g, a_gbar, a_cons, kp_src, shifted)
+      deallocate (gw, a_pre, a_pre0, a_g, a_gbar, a_cons, kp_src, shifted, p_pre, p_g, p_gbar)
 
    end subroutine dump_remap_comparison
 
