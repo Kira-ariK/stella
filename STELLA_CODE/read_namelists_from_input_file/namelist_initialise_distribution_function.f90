@@ -17,6 +17,8 @@
 !      chop_side = .false.
 !      left = .true.
 !      set_theta0_to_zero = .false.
+!      ikx_init = 0
+!      iky_init = 0
 ! 
 !   initialise_distribution_noise
 !      zf_init = 1.0
@@ -204,7 +206,7 @@ contains
    !                      INITIALISE POTENTIAL: MAXWELLIAN                     !
    !****************************************************************************
    subroutine read_namelist_initialise_distribution_maxwellian(width0, den0, upar0, oddparity, & 
-      left, chop_side, set_theta0_to_zero)
+      left, chop_side, set_theta0_to_zero, ikx_init, iky_init)
 
       use mp, only: proc0
       
@@ -216,6 +218,8 @@ contains
       logical, intent(out) :: left
       logical, intent(out) :: chop_side
       logical, intent(out) :: set_theta0_to_zero
+      ! If > 0, initialise only this k_x (ikx) or k_y (iky) index; 0 initialises every mode
+      integer, intent(out) :: ikx_init, iky_init
       
       !-------------------------------------------------------------------------
 
@@ -238,6 +242,8 @@ contains
          chop_side = .false.
          left = .true.
          set_theta0_to_zero = .false. 
+         ikx_init = 0
+         iky_init = 0
 
       end subroutine set_default_parameters_initialise_distribution_maxwellian
 
@@ -249,7 +255,7 @@ contains
          implicit none
 
          namelist /initialise_distribution_maxwellian/ width0, den0, upar0, oddparity, & 
-               left, chop_side, set_theta0_to_zero
+               left, chop_side, set_theta0_to_zero, ikx_init, iky_init
          in_file = input_unit_exist('initialise_distribution_maxwellian', dexist)
          if (dexist) read (unit=in_file, nml=initialise_distribution_maxwellian) 
 
@@ -272,6 +278,8 @@ contains
          write (unit, '(A, L1)') '  left = ', left
          write (unit, '(A, L1)') '  chop_side = ', chop_side
          write (unit, '(A, L1)') '  set_theta0_to_zero = ', set_theta0_to_zero
+         write (unit, '(A, I0)') '  ikx_init = ', ikx_init
+         write (unit, '(A, I0)') '  iky_init = ', iky_init
          write (unit, '(A)') '/'
          write (unit, '(A)') ''
       

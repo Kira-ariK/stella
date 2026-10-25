@@ -501,12 +501,13 @@ contains
       ! Read the following variables from the input file
       real :: width0, den0, upar0
       logical :: oddparity, left, chop_side, set_theta0_to_zero
+      integer :: ikx_init, iky_init
       
       !-------------------------------------------------------------------------
       
       ! Read <initialise_distribution_maxwellian> namelist
       if (proc0) call read_namelist_initialise_distribution_maxwellian(width0, den0, upar0, oddparity, & 
-         left, chop_side, set_theta0_to_zero)
+         left, chop_side, set_theta0_to_zero, ikx_init, iky_init)
          
       ! Broadcast to all processors
       call broadcast(width0)
@@ -516,6 +517,8 @@ contains
       call broadcast(left)
       call broadcast(chop_side)
       call broadcast(set_theta0_to_zero)
+      call broadcast(ikx_init)
+      call broadcast(iky_init)
 
       right = .not. left
 
@@ -562,6 +565,18 @@ contains
             end do
          end if
       end if
+      ! Keep a single k_x and/or k_y index if requested (0 keeps every mode)
+      if (ikx_init > 0) then
+         do ikx = 1, nakx
+            if (ikx /= ikx_init) phi(:, ikx, :) = 0.0
+         end do
+      end if
+      if (iky_init > 0) then
+         do iky = 1, naky
+            if (iky /= iky_init) phi(iky, :, :) = 0.0
+         end do
+      end if
+
       ! need better way to initialise for full flux surface cases
       ia = 1
 
