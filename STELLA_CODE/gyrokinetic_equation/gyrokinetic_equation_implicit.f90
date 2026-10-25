@@ -294,7 +294,7 @@ contains
 
       complex, dimension(:, :, -nzgrid:, :, vmu_lo%llim_proc:), intent(in) :: g
       complex, dimension(:, :, -nzgrid:, :), intent(in out) :: phi, apar, bpar
-      complex, dimension(:, :, :, :, :), allocatable :: gw
+      complex, dimension(:, :, :, :, :), allocatable :: gw, gbar_b, gbar_o
       complex, dimension(:, :, :, :), allocatable :: a_pre, a_pre0, a_g, a_gbar, a_cons, kp_src
       complex, dimension(:, :, :, :), allocatable :: p_pre, p_g, p_gbar
       logical, dimension(:), allocatable :: shifted
@@ -330,6 +330,7 @@ contains
       call advance_fields(gw, phi, apar, bpar, dist='gbar')
       a_gbar = apar
       p_gbar = phi
+      allocate (gbar_b, source=gw)                 ! gbar after the gbar remap: the shifted gbar
 
       ! Original: shift g, A_par from g
       gw = g
@@ -341,6 +342,13 @@ contains
       a_g = apar
       p_g = phi
       fields_updated = .false.
+
+      ! gbar after the original remap: the shifted g plus the A_par term rebuilt with the re-solved A_par (what the next
+      ! time-advancing sub-step builds). Compared with gbar_b; gbar_b - (shifted g) is the A_par part of gbar_b.
+      allocate (gbar_o, source=gw)
+      call gbar_to_g(gbar_o, a_g, -1.0)
+      call write_gbar_norms(gbar_b, gbar_o, gw, shifted)
+      deallocate (gbar_b, gbar_o)
 
       ! k_perp^2 of the cell each mode comes from, and A_pre moved with its mode
       kp_src = spread(cmplx(kperp2(:, :, 1, :)), 4, ntubes)
@@ -421,5 +429,75 @@ contains
       deallocate (gw, a_pre, a_pre0, a_g, a_gbar, a_cons, kp_src, shifted, p_pre, p_g, p_gbar)
 
    end subroutine dump_remap_comparison
+
+   !****************************************************************************
+   !     Diagnostic: norms of gbar after the gbar remap and after the original
+   !****************************************************************************
+   ! For each shifted, non-zonal k_y and each species, norms over (k_x, z, tube 1, v_par, mu) with stella's velocity
+   ! quadrature weights (wgts_vpa * wgts_mu, i.e. pi^(-3/2) int d^3v):
+   !   L2:  ||f||^2 = sum |f|^2;    free energy:  ||f||_F^2 = sum |f|^2 / F   (F = maxwell_vpa * maxwell_mu * maxwell_fac)
+   ! of gbar_b (gbar remap: shifted gbar), gbar_o (original: shifted g + A_par term with A_par re-solved), their
+   ! difference, and the A_par part of gbar_b (gbar_b - g_s, with g_s the shifted g).  proc0 appends to remap_dump_gbar.txt.
+   subroutine write_gbar_norms(gbar_b, gbar_o, g_s, shifted)
+
+      use mp, only: proc0, sum_allreduce
+      use parallelisation_layouts, only: vmu_lo, iv_idx, imu_idx, is_idx
+      use grids_z, only: nzgrid
+      use grids_kxky, only: naky, aky, zonal_mode
+      use grids_species, only: nspec
+      use grids_time, only: code_time
+      use grids_velocity, only: wgts_vpa, wgts_mu, maxwell_vpa, maxwell_mu, maxwell_fac
+
+      implicit none
+
+      complex, dimension(:, :, -nzgrid:, :, vmu_lo%llim_proc:), intent(in) :: gbar_b, gbar_o, g_s
+      logical, dimension(:), intent(in) :: shifted
+      real, dimension(:, :, :), allocatable :: s                 ! (iky, is, quantity)
+      integer :: ivmu, iv, imu, is, iky, iz, unit, q
+      real :: w, wf
+      logical, save :: first = .true.
+
+      allocate (s(naky, nspec, 8)); s = 0.
+      do ivmu = vmu_lo%llim_proc, vmu_lo%ulim_proc
+         iv = iv_idx(vmu_lo, ivmu); imu = imu_idx(vmu_lo, ivmu); is = is_idx(vmu_lo, ivmu)
+         do iz = -nzgrid, nzgrid
+            w = wgts_vpa(iv) * wgts_mu(1, iz, imu)
+            wf = w / (maxwell_vpa(iv, is) * maxwell_mu(1, iz, imu, is) * maxwell_fac(is))
+            do iky = 1, naky
+               s(iky, is, 1) = s(iky, is, 1) + w * sum(abs(gbar_b(iky, :, iz, 1, ivmu))**2)
+               s(iky, is, 2) = s(iky, is, 2) + w * sum(abs(gbar_o(iky, :, iz, 1, ivmu))**2)
+               s(iky, is, 3) = s(iky, is, 3) + w * sum(abs(gbar_o(iky, :, iz, 1, ivmu) - gbar_b(iky, :, iz, 1, ivmu))**2)
+               s(iky, is, 4) = s(iky, is, 4) + w * sum(abs(gbar_b(iky, :, iz, 1, ivmu) - g_s(iky, :, iz, 1, ivmu))**2)
+               s(iky, is, 5) = s(iky, is, 5) + wf * sum(abs(gbar_b(iky, :, iz, 1, ivmu))**2)
+               s(iky, is, 6) = s(iky, is, 6) + wf * sum(abs(gbar_o(iky, :, iz, 1, ivmu))**2)
+               s(iky, is, 7) = s(iky, is, 7) + wf * sum(abs(gbar_o(iky, :, iz, 1, ivmu) - gbar_b(iky, :, iz, 1, ivmu))**2)
+               s(iky, is, 8) = s(iky, is, 8) + wf * sum(abs(gbar_b(iky, :, iz, 1, ivmu) - g_s(iky, :, iz, 1, ivmu))**2)
+            end do
+         end do
+      end do
+      call sum_allreduce(s)
+      s = sqrt(s)
+
+      if (proc0) then
+         open (newunit=unit, file='remap_dump_gbar.txt', position='append', action='write')
+         if (first) then
+            write (unit, '(A)') '# Norms of gbar after one remap, from the same state: B = gbar remap (shifted gbar), O = original'
+            write (unit, '(A)') '# (shifted g, A_par re-solved, gbar rebuilt). L2 = sqrt(sum |f|^2 w), F = sqrt(sum |f|^2 w / F0),'
+            write (unit, '(A)') '# w = wgts_vpa*wgts_mu, sums over k_x, z, v_par, mu (tube 1). Apart = A_par part of gbar_B.'
+            write (unit, '(A)') '# event t ky species L2_B L2_O L2_OminusB L2_Apart F_B F_O F_OminusB F_Apart'
+            first = .false.
+         end if
+         do iky = 1, naky
+            if (.not. shifted(iky) .or. zonal_mode(iky)) cycle
+            do is = 1, nspec
+               write (unit, '(I4, 1X, ES14.7, 1X, F9.5, 1X, I2, 8(1X, ES13.5))') ndump_done + 1, code_time, aky(iky), is, &
+                  (s(iky, is, q), q = 1, 8)
+            end do
+         end do
+         close (unit)
+      end if
+      deallocate (s)
+
+   end subroutine write_gbar_norms
 
 end module gyrokinetic_equation_implicit
